@@ -1,103 +1,92 @@
 import io
 import zipfile
-import re
 import olefile
 from typing import Union
 from pdfminer.high_level import extract_text
-from pdfminer.pdfparser import PDFParser
-from pdfminer.pdfdocument import PDFDocument
 from docx import Document
 
-def get_file_bytes(file) -> bytes:
-    """Конвертирует файл в bytes"""
-    if hasattr(file, 'read'):
-        file.seek(0)
-        return file.read()
-    return file
-
-def is_valid_pdf(file_bytes: bytes) -> bool:
-    """Проверяет валидность PDF"""
+def parse_pdf(file) -> str:
+    """Парсинг PDF с обработкой ошибок"""
     try:
+        if hasattr(file, 'read'):
+            file_bytes = file.read()
+        else:
+            file_bytes = file
+            
         with io.BytesIO(file_bytes) as f:
-            parser = PDFParser(f)
-            PDFDocument(parser)
-            return True
-    except:
-        return False
-
-def parse_pdf(file_bytes: bytes) -> str:
-    """Парсинг PDF файлов"""
-    try:
-        if not is_valid_pdf(file_bytes):
-            raise ValueError("Неверный формат PDF или файл поврежден")
-        
-        text = extract_text(io.BytesIO(file_bytes))
-        if not text.strip():
-            raise ValueError("PDF не содержит текста (возможно сканированный документ)")
-        
-        return text.strip()
+            return extract_text(f)
     except Exception as e:
-        raise ValueError(f"PDF ошибка: {str(e)}")
+        raise ValueError(f"Ошибка чтения PDF: {str(e)}")
 
-def parse_docx(file_bytes: bytes) -> str:
-    """Парсинг DOCX файлов"""
+def parse_docx(file) -> str:
+    """Парсинг DOCX"""
     try:
+        if hasattr(file, 'read'):
+            file_bytes = file.read()
+        else:
+            file_bytes = file
+            
         doc = Document(io.BytesIO(file_bytes))
-        text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-        
-        if not text.strip():
-            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-                with z.open('word/document.xml') as f:
-                    xml_content = f.read().decode('utf-8')
-                    text = re.sub('<[^>]+>', '', xml_content)[:10000]
-        
-        return text.strip()
+        return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
     except Exception as e:
-        raise ValueError(f"DOCX ошибка: {str(e)}")
+        raise ValueError(f"Ошибка чтения DOCX: {str(e)}")
 
-def parse_old_doc(file_bytes: bytes) -> str:
-    """Парсинг старых DOC файлов"""
+def parse_doc(file) -> str:
+    """Парсинг старых DOC"""
     try:
+        if hasattr(file, 'read'):
+            file_bytes = file.read()
+        else:
+            file_bytes = file
+            
         with io.BytesIO(file_bytes) as f:
             if not olefile.isOleFile(f):
-                raise ValueError("Не является DOC файлом")
-            
+                raise ValueError("Неверный формат DOC")
+                
             ole = olefile.OleFileIO(f)
             if ole.exists('WordDocument'):
                 stream = ole.openstream('WordDocument')
                 text = stream.read().decode('latin-1', errors='ignore')
                 return ' '.join(text.split()).strip()
-        
+                
         raise ValueError("Не удалось извлечь текст из DOC")
     except Exception as e:
-        raise ValueError(f"DOC ошибка: {str(e)}")
+        raise ValueError(f"Ошибка чтения DOC: {str(e)}")
 
-def parse_txt(file_bytes: bytes) -> str:
-    """Парсинг текстовых файлов"""
-    encodings = ['utf-8', 'cp1251', 'windows-1251']
-    for enc in encodings:
-        try:
-            return file_bytes.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    raise ValueError("Не удалось определить кодировку")
+def parse_txt(file) -> str:
+    """Парсинг TXT"""
+    try:
+        if hasattr(file, 'read'):
+            file_bytes = file.read()
+        else:
+            file_bytes = file
+            
+        for encoding in ['utf-8', 'cp1251', 'windows-1251']:
+            try:
+                return file_bytes.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise ValueError("Не удалось определить кодировку")
+    except Exception as e:
+        raise ValueError(f"Ошибка чтения TXT: {str(e)}")
 
 def parse_resume(file) -> str:
-    """Основная функция для обработки резюме"""
-    try:
-        file_bytes = get_file_bytes(file)
+    """Основной парсер"""
+    if not file:
+        raise ValueError("Файл не загружен")
         
-        if file_bytes.startswith(b'%PDF-') or is_valid_pdf(file_bytes):
-            return parse_pdf(file_bytes)
-        elif file_bytes.startswith(b'PK\x03\x04'):
-            return parse_docx(file_bytes)
-        elif file_bytes.startswith(b'\xD0\xCF\x11\xE0'):
-            return parse_old_doc(file_bytes)
+    filename = file.name.lower() if hasattr(file, 'name') else "file"
+    
+    try:
+        if filename.endswith('.pdf'):
+            return parse_pdf(file)
+        elif filename.endswith('.docx'):
+            return parse_docx(file)
+        elif filename.endswith('.doc'):
+            return parse_doc(file)
+        elif filename.endswith('.txt'):
+            return parse_txt(file)
         else:
-            try:
-                return parse_txt(file_bytes)
-            except:
-                raise ValueError("Неподдерживаемый формат файла")
-                
+            raise ValueError("Неподдерживаемый формат файла")
     except Exception as e:
         raise ValueError(f"Ошибка обработки файла: {str(e)}")
